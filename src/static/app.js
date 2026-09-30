@@ -3,6 +3,24 @@ document.addEventListener("DOMContentLoaded", () => {
   const activitySelect = document.getElementById("activity");
   const signupForm = document.getElementById("signup-form");
   const messageDiv = document.getElementById("message");
+  const signupContainer = document.getElementById("signup-container");
+  const teacherAuthButton = document.getElementById("teacher-auth-button");
+  const loginDialog = document.getElementById("teacher-login-dialog");
+  const loginForm = document.getElementById("teacher-login-form");
+  const loginMessage = document.getElementById("login-message");
+  let teacherAuthorization = null;
+
+  function updateTeacherControls() {
+    const isTeacher = teacherAuthorization !== null;
+    signupContainer.classList.toggle("hidden", !isTeacher);
+    teacherAuthButton.textContent = isTeacher ? "Log out" : "Teacher login";
+  }
+
+  function encodeBasicCredentials(username, password) {
+    const bytes = new TextEncoder().encode(`${username}:${password}`);
+    const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
+    return `Basic ${btoa(binary)}`;
+  }
 
   // Function to fetch activities from API
   async function fetchActivities() {
@@ -12,6 +30,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // Clear loading message
       activitiesList.innerHTML = "";
+      activitySelect.options.length = 1;
 
       // Populate activities list
       Object.entries(activities).forEach(([name, details]) => {
@@ -21,7 +40,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const spotsLeft =
           details.max_participants - details.participants.length;
 
-        // Create participants HTML with delete icons instead of bullet points
+        // Only authenticated teachers can change student registrations.
         const participantsHTML =
           details.participants.length > 0
             ? `<div class="participants-section">
@@ -30,7 +49,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 ${details.participants
                   .map(
                     (email) =>
-                      `<li><span class="participant-email">${email}</span><button class="delete-btn" data-activity="${name}" data-email="${email}">❌</button></li>`
+                      `<li><span class="participant-email">${email}</span>${
+                        teacherAuthorization
+                          ? `<button class="delete-btn" data-activity="${name}" data-email="${email}" aria-label="Unregister ${email}">❌</button>`
+                          : ""
+                      }</li>`
                   )
                   .join("")}
               </ul>
@@ -69,7 +92,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Handle unregister functionality
   async function handleUnregister(event) {
-    const button = event.target;
+    const button = event.currentTarget;
     const activity = button.getAttribute("data-activity");
     const email = button.getAttribute("data-email");
 
@@ -80,6 +103,7 @@ document.addEventListener("DOMContentLoaded", () => {
         )}/unregister?email=${encodeURIComponent(email)}`,
         {
           method: "DELETE",
+          headers: { Authorization: teacherAuthorization },
         }
       );
 
@@ -124,6 +148,7 @@ document.addEventListener("DOMContentLoaded", () => {
         )}/signup?email=${encodeURIComponent(email)}`,
         {
           method: "POST",
+          headers: { Authorization: teacherAuthorization },
         }
       );
 
@@ -155,6 +180,54 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  teacherAuthButton.addEventListener("click", () => {
+    if (teacherAuthorization) {
+      teacherAuthorization = null;
+      updateTeacherControls();
+      fetchActivities();
+      return;
+    }
+    loginDialog.showModal();
+    document.getElementById("teacher-username").focus();
+  });
+
+  document.getElementById("cancel-login").addEventListener("click", () => {
+    loginDialog.close();
+    loginForm.reset();
+    loginMessage.className = "hidden";
+  });
+
+  loginForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const username = document.getElementById("teacher-username").value;
+    const password = document.getElementById("teacher-password").value;
+    const authorization = encodeBasicCredentials(username, password);
+
+    try {
+      const response = await fetch("/auth/verify", {
+        headers: { Authorization: authorization },
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        loginMessage.textContent = result.detail || "Unable to log in";
+        loginMessage.className = "error";
+        return;
+      }
+
+      teacherAuthorization = authorization;
+      loginForm.reset();
+      loginDialog.close();
+      loginMessage.className = "hidden";
+      updateTeacherControls();
+      fetchActivities();
+    } catch (error) {
+      loginMessage.textContent = "Login failed. Please try again.";
+      loginMessage.className = "error";
+      console.error("Error logging in:", error);
+    }
+  });
+
   // Initialize app
+  updateTeacherControls();
   fetchActivities();
 });

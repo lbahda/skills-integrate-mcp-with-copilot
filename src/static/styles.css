@@ -16,12 +16,58 @@ body {
 }
 
 header {
+  position: relative;
   text-align: center;
-  padding: 20px 0;
+  padding: 52px 16px 20px;
   margin-bottom: 30px;
   background-color: #1a237e;
   color: white;
   border-radius: 5px;
+}
+
+#teacher-auth-button {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background-color: white;
+  color: #1a237e;
+}
+
+#teacher-login-dialog {
+  width: min(90vw, 380px);
+  margin: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+}
+
+#teacher-login-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.45);
+}
+
+#teacher-login-form {
+  padding: 24px;
+}
+
+#teacher-login-form h2 {
+  margin-bottom: 20px;
+  color: #1a237e;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+#cancel-login {
+  background-color: #555;
+}
+
+#login-message {
+  margin-bottom: 16px;
+  padding: 10px;
 }
 
 header h1 {

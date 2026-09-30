@@ -5,10 +5,14 @@ A super simple FastAPI application that allows students to view and sign up
 for extracurricular activities at Mergington High School.
 """
 
-from fastapi import FastAPI, HTTPException
+import hashlib
+import hmac
+import json
+import os
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
-import os
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pathlib import Path
 
 app = FastAPI(title="Mergington High School API",
@@ -16,8 +20,63 @@ app = FastAPI(title="Mergington High School API",
 
 # Mount the static files directory
 current_dir = Path(__file__).parent
+teacher_credentials_file = Path(
+    os.environ.get("TEACHER_CREDENTIALS_FILE", current_dir / "teachers.json")
+)
+teacher_auth = HTTPBasic(auto_error=False)
 app.mount("/static", StaticFiles(directory=os.path.join(Path(__file__).parent,
           "static")), name="static")
+
+
+def hash_teacher_password(password: str, salt: bytes | None = None) -> dict[str, str]:
+    salt = salt or os.urandom(16)
+    password_hash = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt, 600_000
+    )
+    return {"salt": salt.hex(), "password_hash": password_hash.hex()}
+
+
+def require_teacher(
+    credentials: HTTPBasicCredentials | None = Depends(teacher_auth),
+) -> str:
+    try:
+        teacher_records = json.loads(teacher_credentials_file.read_text()).get("teachers")
+        if not isinstance(teacher_records, dict):
+            raise ValueError("Invalid teacher credential data")
+    except (OSError, json.JSONDecodeError, AttributeError, ValueError):
+        raise HTTPException(
+            status_code=503,
+            detail="Teacher accounts are not configured",
+        ) from None
+
+    if credentials is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Teacher login required",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+
+    record = teacher_records.get(credentials.username)
+    try:
+        salt = bytes.fromhex(record["salt"])
+        expected_hash = bytes.fromhex(record["password_hash"])
+    except (TypeError, KeyError, ValueError):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid teacher credentials",
+            headers={"WWW-Authenticate": "Basic"},
+        ) from None
+
+    actual_hash = hashlib.pbkdf2_hmac(
+        "sha256", credentials.password.encode("utf-8"), salt, 600_000
+    )
+    if not hmac.compare_digest(actual_hash, expected_hash):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid teacher credentials",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
 
 # In-memory activity database
 activities = {
@@ -88,8 +147,17 @@ def get_activities():
     return activities
 
 
+@app.get("/auth/verify")
+def verify_teacher(teacher: str = Depends(require_teacher)):
+    return {"username": teacher}
+
+
 @app.post("/activities/{activity_name}/signup")
-def signup_for_activity(activity_name: str, email: str):
+def signup_for_activity(
+    activity_name: str,
+    email: str,
+    _: str = Depends(require_teacher),
+):
     """Sign up a student for an activity"""
     # Validate activity exists
     if activity_name not in activities:
@@ -111,7 +179,11 @@ def signup_for_activity(activity_name: str, email: str):
 
 
 @app.delete("/activities/{activity_name}/unregister")
-def unregister_from_activity(activity_name: str, email: str):
+def unregister_from_activity(
+    activity_name: str,
+    email: str,
+    _: str = Depends(require_teacher),
+):
     """Unregister a student from an activity"""
     # Validate activity exists
     if activity_name not in activities:
